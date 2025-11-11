@@ -2,12 +2,88 @@
 
 import { cva, type VariantProps } from "class-variance-authority";
 import type * as React from "react";
+import { useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 
 function InputGroup({ className, ...props }: React.ComponentProps<"div">) {
+  const ref = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const w = window as Window & {
+      __inputGroupGlobalKeyHandlerAttached?: boolean;
+    };
+    if (w.__inputGroupGlobalKeyHandlerAttached) {
+      return;
+    }
+
+    const isModifier = (e: KeyboardEvent) => e.ctrlKey || e.metaKey || e.altKey;
+    const isPrintable = (key: string) => key.length === 1;
+    const activeIsEditable = () => {
+      const active = document.activeElement as HTMLElement | null;
+      return !!(
+        active &&
+        (active.tagName === "INPUT" ||
+          active.tagName === "TEXTAREA" ||
+          active.isContentEditable)
+      );
+    };
+
+    const insertCharIntoInput = (
+      input: HTMLInputElement | HTMLTextAreaElement,
+      key: string
+    ) => {
+      try {
+        const start = (input.selectionStart ?? input.value.length) as number;
+        const end = (input.selectionEnd ?? start) as number;
+        const val = input.value ?? "";
+        const newVal = val.slice(0, start) + key + val.slice(end);
+        input.value = newVal;
+        const pos = start + 1;
+        input.setSelectionRange(pos, pos);
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+      } catch {
+        return;
+      }
+    };
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (isModifier(e)) {
+        return;
+      }
+
+      if (!isPrintable(e.key)) {
+        return;
+      }
+
+      if (activeIsEditable()) {
+        return;
+      }
+
+      const input = document.querySelector<
+        HTMLInputElement | HTMLTextAreaElement
+      >(
+        'input[data-slot="input-group-control"], textarea[data-slot="input-group-control"]'
+      );
+      if (!input) {
+        return;
+      }
+
+      input.focus();
+      insertCharIntoInput(input, e.key);
+      e.preventDefault();
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    w.__inputGroupGlobalKeyHandlerAttached = true;
+
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, []);
+
   return (
     <div
       className={cn(
@@ -29,6 +105,7 @@ function InputGroup({ className, ...props }: React.ComponentProps<"div">) {
         className
       )}
       data-slot="input-group"
+      ref={ref}
       role="group"
       {...props}
     />
