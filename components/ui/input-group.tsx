@@ -2,14 +2,31 @@
 
 import { cva, type VariantProps } from "class-variance-authority";
 import type * as React from "react";
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 
-function InputGroup({ className, ...props }: React.ComponentProps<"div">) {
-  const ref = useRef<HTMLDivElement | null>(null);
+function InputGroup({ className, ...props }: React.ComponentProps<"fieldset">) {
+  const ref = useRef<HTMLFieldSetElement | null>(null);
+
+  const clearGroupedInput = useCallback(() => {
+    try {
+      const input = document.querySelector<
+        HTMLInputElement | HTMLTextAreaElement
+      >(
+        'input[data-slot="input-group-control"], textarea[data-slot="input-group-control"]'
+      );
+      if (input?.value) {
+        input.value = "";
+        input.setSelectionRange(0, 0);
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+    } catch {
+      // ignore
+    }
+  }, []);
 
   useEffect(() => {
     const w = window as Window & {
@@ -50,6 +67,11 @@ function InputGroup({ className, ...props }: React.ComponentProps<"div">) {
     };
 
     const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        clearGroupedInput();
+        return;
+      }
+
       if (isModifier(e)) {
         return;
       }
@@ -82,10 +104,10 @@ function InputGroup({ className, ...props }: React.ComponentProps<"div">) {
     return () => {
       window.removeEventListener("keydown", onKeyDown);
     };
-  }, []);
+  }, [clearGroupedInput]);
 
   return (
-    <div
+    <fieldset
       className={cn(
         "group/input-group relative flex w-full items-center rounded-md border border-input shadow-xs outline-none transition-[color,box-shadow] dark:bg-input/30",
         "h-9 min-w-0 has-[>textarea]:h-auto",
@@ -106,7 +128,6 @@ function InputGroup({ className, ...props }: React.ComponentProps<"div">) {
       )}
       data-slot="input-group"
       ref={ref}
-      role="group"
       {...props}
     />
   );
@@ -136,22 +157,63 @@ const inputGroupAddonVariants = cva(
 function InputGroupAddon({
   className,
   align = "inline-start",
+  showEsc = false,
+  children,
   ...props
-}: React.ComponentProps<"div"> & VariantProps<typeof inputGroupAddonVariants>) {
+}: React.ComponentProps<"button"> &
+  VariantProps<typeof inputGroupAddonVariants> & { showEsc?: boolean }) {
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLButtonElement>) => {
+    if (e.key === "Escape") {
+      try {
+        const input = document.querySelector<
+          HTMLInputElement | HTMLTextAreaElement
+        >(
+          'input[data-slot="input-group-control"], textarea[data-slot="input-group-control"]'
+        );
+        if (input?.value) {
+          input.value = "";
+          input.setSelectionRange(0, 0);
+          input.dispatchEvent(new Event("input", { bubbles: true }));
+          try {
+            window.dispatchEvent(new CustomEvent("inputgroup:clear"));
+          } catch {
+            // ignore
+          }
+        }
+      } catch {
+        // ignore
+      }
+      e.preventDefault();
+      return;
+    }
+
+    if (props.onKeyDown) {
+      props.onKeyDown(e as unknown as React.KeyboardEvent<HTMLButtonElement>);
+    }
+  };
+
   return (
-    <div
+    <button
       className={cn(inputGroupAddonVariants({ align }), className)}
       data-align={align}
       data-slot="input-group-addon"
       onClick={(e) => {
-        if ((e.target as HTMLElement).closest("button")) {
+        // If the actual click was on a nested button inside the addon, let it handle it.
+        if (
+          (e.target as HTMLElement).closest("button") &&
+          (e.target as HTMLElement) !== e.currentTarget
+        ) {
           return;
         }
         e.currentTarget.parentElement?.querySelector("input")?.focus();
       }}
-      role="group"
+      onKeyDown={handleKeyDown}
+      type="button"
       {...props}
-    />
+    >
+      {children}
+      {showEsc ? <kbd>Esc</kbd> : null}
+    </button>
   );
 }
 
@@ -206,8 +268,39 @@ function InputGroupText({ className, ...props }: React.ComponentProps<"span">) {
 
 function InputGroupInput({
   className,
+  onKeyDown,
+  onChange,
   ...props
 }: React.ComponentProps<"input">) {
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Escape") {
+      const input = e.currentTarget as HTMLInputElement;
+      input.value = "";
+
+      if (typeof onChange === "function") {
+        const ev = {
+          target: input,
+          currentTarget: input,
+        } as unknown as React.ChangeEvent<HTMLInputElement>;
+        onChange(ev);
+      }
+
+      try {
+        window.dispatchEvent(new CustomEvent("inputgroup:clear"));
+      } catch {
+        // ignore
+      }
+
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
+
+    if (typeof onKeyDown === "function") {
+      onKeyDown(e);
+    }
+  };
+
   return (
     <Input
       className={cn(
@@ -215,6 +308,8 @@ function InputGroupInput({
         className
       )}
       data-slot="input-group-control"
+      onChange={onChange}
+      onKeyDown={handleKeyDown}
       {...props}
     />
   );
