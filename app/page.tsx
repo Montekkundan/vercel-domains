@@ -74,6 +74,7 @@ export default function Home() {
 
   const TOP_SKELETON_KEYS = ["t1", "t2", "t3", "t4"] as const;
   const ROW_SKELETON_KEYS = ["r1", "r2", "r3", "r4", "r5", "r6"] as const;
+  const latestQueryRef = useRef("");
 
   const fetchDomains = useCallback(
     async (query: string, signal?: AbortSignal): Promise<DomainResult[]> => {
@@ -100,6 +101,7 @@ export default function Home() {
 
   const runSearch = useCallback(
     async (original: string, controller: AbortController) => {
+      latestQueryRef.current = original;
       const now = Date.now();
 
       function getCachedSearch(s: string) {
@@ -124,6 +126,9 @@ export default function Home() {
 
       const cached = getCachedSearch(original);
       if (cached) {
+        if (latestQueryRef.current !== original) {
+          return;
+        }
         setResults(cached);
         setLoading(false);
         updateUrl(original);
@@ -131,6 +136,9 @@ export default function Home() {
       }
 
       const r = await fetchDomains(original, controller.signal);
+      if (latestQueryRef.current !== original) {
+        return;
+      }
       searchCacheRef.current.set(original, { results: r, ts: Date.now() });
       if (fetchAbortRef.current === controller) {
         fetchAbortRef.current = null;
@@ -168,6 +176,7 @@ export default function Home() {
         url.searchParams.delete("q");
         window.history.replaceState(null, "", url.pathname + url.search);
       } catch {}
+      latestQueryRef.current = "";
     };
 
     window.addEventListener("inputgroup:clear", onClear);
@@ -195,6 +204,7 @@ export default function Home() {
         url.searchParams.delete("q");
         window.history.replaceState(null, "", url.pathname + url.search);
       } catch {}
+      latestQueryRef.current = "";
       return;
     }
 
