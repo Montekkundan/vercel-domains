@@ -61,6 +61,11 @@ export function normalizeDomainPayload(payload: unknown): DomainResult[] {
 export default function Home() {
   const [q, setQ] = useState("");
 
+  const searchCacheRef = useRef<
+    Map<string, { results: DomainResult[]; ts: number }>
+  >(new Map());
+  const SEARCH_CACHE_TTL = 1000 * 60 * 2;
+
   const [results, setResults] = useState<DomainResult[]>([]);
   const [loading, setLoading] = useState(false);
 
@@ -83,7 +88,6 @@ export default function Home() {
         const payload = data?.domains ?? data ?? [];
         return normalizeDomainPayload(payload);
       } catch (err: unknown) {
-        // If aborted, swallow the error and return empty results.
         if (err instanceof DOMException && err.name === "AbortError") {
           return [];
         }
@@ -94,7 +98,51 @@ export default function Home() {
     []
   );
 
-  // If the page was opened with ?q=..., prefill the input and trigger a search
+  const runSearch = useCallback(
+    async (original: string, controller: AbortController) => {
+      const now = Date.now();
+
+      function getCachedSearch(s: string) {
+        const c = searchCacheRef.current.get(s);
+        if (c && now - c.ts < SEARCH_CACHE_TTL) {
+          return c.results;
+        }
+        return undefined as DomainResult[] | undefined;
+      }
+
+      const updateUrl = (s: string) => {
+        try {
+          const url = new URL(window.location.href);
+          if (s) {
+            url.searchParams.set("q", s);
+          } else {
+            url.searchParams.delete("q");
+          }
+          window.history.replaceState(null, "", url.pathname + url.search);
+        } catch {}
+      };
+
+      const cached = getCachedSearch(original);
+      if (cached) {
+        setResults(cached);
+        setLoading(false);
+        updateUrl(original);
+        return;
+      }
+
+      const r = await fetchDomains(original, controller.signal);
+      searchCacheRef.current.set(original, { results: r, ts: Date.now() });
+      if (fetchAbortRef.current === controller) {
+        fetchAbortRef.current = null;
+      }
+      setResults(r);
+
+      setLoading(false);
+      updateUrl(original);
+    },
+    [fetchDomains]
+  );
+
   useEffect(() => {
     try {
       const params = new URLSearchParams(window.location.search);
@@ -102,9 +150,7 @@ export default function Home() {
       if (paramQ) {
         setQ(paramQ);
       }
-    } catch {
-      // ignore
-    }
+    } catch {}
     const onClear = () => {
       if (debounceRef.current) {
         clearTimeout(debounceRef.current);
@@ -121,9 +167,7 @@ export default function Home() {
         const url = new URL(window.location.href);
         url.searchParams.delete("q");
         window.history.replaceState(null, "", url.pathname + url.search);
-      } catch {
-        // ignore
-      }
+      } catch {}
     };
 
     window.addEventListener("inputgroup:clear", onClear);
@@ -150,9 +194,7 @@ export default function Home() {
         const url = new URL(window.location.href);
         url.searchParams.delete("q");
         window.history.replaceState(null, "", url.pathname + url.search);
-      } catch {
-        // ignore
-      }
+      } catch {}
       return;
     }
 
@@ -164,23 +206,8 @@ export default function Home() {
       const controller = new AbortController();
       fetchAbortRef.current = controller;
 
-      fetchDomains(q, controller.signal).then((r: DomainResult[]) => {
-        if (fetchAbortRef.current === controller) {
-          fetchAbortRef.current = null;
-        }
-        setResults(r);
+      runSearch(q, controller).catch(() => {
         setLoading(false);
-        try {
-          const url = new URL(window.location.href);
-          if (q) {
-            url.searchParams.set("q", q);
-          } else {
-            url.searchParams.delete("q");
-          }
-          window.history.replaceState(null, "", url.pathname + url.search);
-        } catch {
-          // ignore
-        }
       });
     }, 300);
 
@@ -189,7 +216,7 @@ export default function Home() {
         clearTimeout(debounceRef.current);
       }
     };
-  }, [q, fetchDomains]);
+  }, [q, runSearch]);
 
   function getStatus(item: DomainResult) {
     if (typeof item === "object") {
@@ -233,9 +260,10 @@ export default function Home() {
         <div className="grid w-full gap-6">
           <InputGroup>
             <InputGroupInput
-              onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                setQ(e.target.value)
-              }
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+                const v = e.target.value;
+                setQ(v);
+              }}
               placeholder="Search supported TLDs (eg: .com or com)..."
               value={q}
             />
@@ -250,7 +278,6 @@ export default function Home() {
           <div>
             {loading && (
               <div>
-                {/* Skeleton for top results */}
                 <div className="mb-4">
                   <h3 className="mb-2 font-medium text-sm">Top Results</h3>
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-4">
@@ -266,7 +293,6 @@ export default function Home() {
                   </div>
                 </div>
 
-                {/* Skeleton for table */}
                 <div>
                   <h3 className="mb-2 font-medium text-sm">All Results</h3>
                   <div className="overflow-hidden rounded-md border bg-white dark:bg-black">
@@ -309,7 +335,6 @@ export default function Home() {
 
             {!loading && results.length > 0 && (
               <div>
-                {/* Top Results */}
                 <div className="mb-4 flex items-center justify-between">
                   <h3 className="font-medium text-sm">Top Results</h3>
                   {q ? (
@@ -331,7 +356,6 @@ export default function Home() {
                   ))}
                 </div>
 
-                {/* All Results (table) */}
                 <div>
                   <h3 className="mb-2 font-medium text-sm">All Results</h3>
                   <div className="overflow-hidden rounded-md border">
