@@ -76,6 +76,26 @@ export default function Home() {
   const ROW_SKELETON_KEYS = ["r1", "r2", "r3", "r4", "r5", "r6"] as const;
   const latestQueryRef = useRef("");
 
+  const clearSearch = useCallback(() => {
+    if (debounceRef.current) {
+      clearTimeout(debounceRef.current);
+      debounceRef.current = null;
+    }
+    if (fetchAbortRef.current) {
+      fetchAbortRef.current.abort();
+      fetchAbortRef.current = null;
+    }
+    setQ("");
+    setResults([]);
+    setLoading(false);
+    latestQueryRef.current = "";
+    try {
+      const url = new URL(window.location.href);
+      url.searchParams.delete("q");
+      window.history.replaceState(null, "", url.pathname + url.search);
+    } catch {}
+  }, []);
+
   const fetchDomains = useCallback(
     async (query: string, signal?: AbortSignal): Promise<DomainResult[]> => {
       try {
@@ -159,29 +179,10 @@ export default function Home() {
         setQ(paramQ);
       }
     } catch {}
-    const onClear = () => {
-      if (debounceRef.current) {
-        clearTimeout(debounceRef.current);
-        debounceRef.current = null;
-      }
-      if (fetchAbortRef.current) {
-        fetchAbortRef.current.abort();
-        fetchAbortRef.current = null;
-      }
-      setQ("");
-      setResults([]);
-      setLoading(false);
-      try {
-        const url = new URL(window.location.href);
-        url.searchParams.delete("q");
-        window.history.replaceState(null, "", url.pathname + url.search);
-      } catch {}
-      latestQueryRef.current = "";
-    };
-
-    window.addEventListener("inputgroup:clear", onClear);
-    return () => window.removeEventListener("inputgroup:clear", onClear);
-  }, []);
+    const handleClear = () => clearSearch();
+    window.addEventListener("inputgroup:clear", handleClear);
+    return () => window.removeEventListener("inputgroup:clear", handleClear);
+  }, [clearSearch]);
 
   useEffect(() => {
     if (debounceRef.current) {
@@ -273,6 +274,12 @@ export default function Home() {
               onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
                 const v = e.target.value;
                 setQ(v);
+              }}
+              onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => {
+                if (e.key === "Escape") {
+                  e.preventDefault();
+                  clearSearch();
+                }
               }}
               placeholder="Search supported TLDs (eg: .com or com)..."
               value={q}
